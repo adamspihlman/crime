@@ -4,8 +4,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
+import geopandas as gpd
+from shapely.geometry import Point
 
-# Page configuration
 st.set_page_config(
     page_title="Chicago Crime Dashboard",
     page_icon="🚨",
@@ -13,7 +14,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
 st.markdown("""
 <style>
     .main-header {
@@ -33,44 +33,63 @@ st.markdown("""
 
 @st.cache_data
 def load_data():
-    """Load and preprocess the crime data"""
     try:
         df = pd.read_csv('data.csv')
         
-        # Convert date column to datetime
         df['DATE  OF OCCURRENCE'] = pd.to_datetime(df['DATE  OF OCCURRENCE'], errors='coerce')
         
-        # Clean up column names
         df.columns = df.columns.str.strip()
         
-        # Add derived columns
         df['Year'] = df['DATE  OF OCCURRENCE'].dt.year
         df['Month'] = df['DATE  OF OCCURRENCE'].dt.month
         df['Day'] = df['DATE  OF OCCURRENCE'].dt.day
         df['Hour'] = df['DATE  OF OCCURRENCE'].dt.hour
         df['Day_of_Week'] = df['DATE  OF OCCURRENCE'].dt.day_name()
         
-        # Filter out rows with invalid dates
         df = df.dropna(subset=['DATE  OF OCCURRENCE'])
-        
+
+        neighborhoods_url = "https://data.cityofchicago.org/resource/igwz-8jzy.geojson"
+        neighborhoods_gdf = gpd.read_file(neighborhoods_url)
+
+        print(neighborhoods_gdf.head())
+
+        df = df.dropna(subset=['LATITUDE', 'LONGITUDE'])
+        geometry = [Point(xy) for xy in zip(df['LONGITUDE'], df['LATITUDE'])]
+        crimes_gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
+
+        print(crimes_gdf.head())
+
+        df = gpd.sjoin(crimes_gdf, neighborhoods_gdf, how="left", predicate="within")
+
+        print(df.head())
+
+        df = df.rename(columns={'community': 'neighborhood'})
+
+        print('Pre column drops')
+
+        df = df.drop(columns=[
+            'DOMESTIC', 'BEAT', 'WARD', 'geometry', 'index_right', 
+            'Month', 'Day', 'Year', 'Hour', 'Day_of_Week', 
+            'shape_area', 'area_numbe', 'area_num_1', 'shape_len', 
+            'LOCATION', 'X COORDINATE', 'Y COORDINATE', 'IUCR'])
+                
+        print('Post column drops')
         return df
+
+
     except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return None
+            st.error(f"Error loading data: {e}")
+            return None
 
 def main():
-    # Header
     st.markdown('<h1 class="main-header">🚨 Chicago Crime Dashboard</h1>', unsafe_allow_html=True)
     
-    # Load data
     df = load_data()
     if df is None:
         st.stop()
     
-    # Sidebar filters
     st.sidebar.header("🔍 Filters")
     
-    # Date range filter
     min_date = df['DATE  OF OCCURRENCE'].min().date()
     max_date = df['DATE  OF OCCURRENCE'].max().date()
     
@@ -90,7 +109,6 @@ def main():
     else:
         df_filtered = df
     
-    # Crime type filter
     crime_types = sorted(df_filtered['PRIMARY DESCRIPTION'].unique())
     selected_crimes = st.sidebar.multiselect(
         "Select Crime Types",
@@ -101,7 +119,6 @@ def main():
     if selected_crimes:
         df_filtered = df_filtered[df_filtered['PRIMARY DESCRIPTION'].isin(selected_crimes)]
     
-    # Arrest filter
     arrest_filter = st.sidebar.selectbox(
         "Arrest Status",
         options=["All", "Arrest Made", "No Arrest"]
@@ -112,10 +129,8 @@ def main():
     elif arrest_filter == "No Arrest":
         df_filtered = df_filtered[df_filtered['ARREST'] == 'N']
     
-    # Main content
     st.markdown("---")
     
-    # Key metrics
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -149,41 +164,21 @@ def main():
             )
     
     st.markdown("---")
+
+    st.subheader("📅 Crimes by Neighborhood")
+    neighborhood_counts = df_filtered['neighborhood'].value_counts().sort_values(ascending=False)
     
-    # Charts section
-    col1, col2 = st.columns(2)
+    fig_line = px.line(
+        x=neighborhood_counts.index,
+        y=neighborhood_counts.values,
+        title="Crimes by Neighborhood",
+        labels={'x': 'Neighborhood', 'y': 'Number of Crimes'}
+    )
+    fig_line.update_layout(height=400)
+    st.plotly_chart(fig_line, use_container_width=True)
     
-    with col1:
-        st.subheader("📊 Crimes by Type")
-        crime_counts = df_filtered['PRIMARY DESCRIPTION'].value_counts().head(10)
-        
-        fig_bar = px.bar(
-            x=crime_counts.values,
-            y=crime_counts.index,
-            orientation='h',
-            title="Top 10 Crime Types",
-            labels={'x': 'Number of Crimes', 'y': 'Crime Type'}
-        )
-        fig_bar.update_layout(height=400)
-        st.plotly_chart(fig_bar, use_container_width=True)
-    
-    with col2:
-        st.subheader("📅 Crimes by Hour")
-        hourly_counts = df_filtered['Hour'].value_counts().sort_index()
-        
-        fig_line = px.line(
-            x=hourly_counts.index,
-            y=hourly_counts.values,
-            title="Crimes by Hour of Day",
-            labels={'x': 'Hour', 'y': 'Number of Crimes'}
-        )
-        fig_line.update_layout(height=400)
-        st.plotly_chart(fig_line, use_container_width=True)
-    
-    # Map visualization
     st.subheader("🗺️ Crime Map")
     
-    # Sample data for map (to avoid performance issues)
     map_sample_size = min(5000, len(df_filtered))
     df_map = df_filtered.sample(n=map_sample_size, random_state=42)
     
@@ -203,10 +198,8 @@ def main():
     )
     st.plotly_chart(fig_map, use_container_width=True)
     
-    # Data table
     st.subheader("📋 Crime Data Table")
     
-    # Pagination
     page_size = st.selectbox("Records per page", [50, 100, 200, 500], index=1)
     
     total_pages = len(df_filtered) // page_size + (1 if len(df_filtered) % page_size > 0 else 0)
@@ -219,14 +212,12 @@ def main():
     else:
         df_display = df_filtered
     
-    # Display table
     st.dataframe(
         df_display,
         use_container_width=True,
         height=400
     )
     
-    # Download button
     csv = df_filtered.to_csv(index=False)
     st.download_button(
         label="📥 Download Filtered Data as CSV",
@@ -235,7 +226,6 @@ def main():
         mime="text/csv"
     )
     
-    # Footer
     st.markdown("---")
     st.markdown(
         f"<div style='text-align: center; color: #666;'>"
