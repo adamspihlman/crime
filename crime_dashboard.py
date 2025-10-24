@@ -119,16 +119,6 @@ def main():
     if selected_crimes:
         df_filtered = df_filtered[df_filtered['PRIMARY DESCRIPTION'].isin(selected_crimes)]
     
-    arrest_filter = st.sidebar.selectbox(
-        "Arrest Status",
-        options=["All", "Arrest Made", "No Arrest"]
-    )
-    
-    if arrest_filter == "Arrest Made":
-        df_filtered = df_filtered[df_filtered['ARREST'] == 'Y']
-    elif arrest_filter == "No Arrest":
-        df_filtered = df_filtered[df_filtered['ARREST'] == 'N']
-    
     st.markdown("---")
     
     col1, col2, col3, col4 = st.columns(4)
