@@ -177,7 +177,14 @@ def main():
         lat='LATITUDE',
         lon='LONGITUDE',
         color='PRIMARY DESCRIPTION',
-        hover_data=['DATE  OF OCCURRENCE', 'BLOCK', 'ARREST'],
+        hover_data={
+            'DATE  OF OCCURRENCE': True, 
+            'neighborhood': True,
+            'BLOCK': True,
+            'ARREST': True, 
+            'LATITUDE': False, 
+            'LONGITUDE': False, 
+            'PRIMARY DESCRIPTION': False},
         zoom=10,
         height=500,
         title=f"Crime Locations (Sample of {map_sample_size:,} records)"
